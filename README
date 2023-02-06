@@ -1,0 +1,31 @@
+mc
+--
+
+header-only utility library of common data structures in c that i am tired of
+re-writing over and over again in every project.
+
+motivation
+----------
+
+write c make me less sad
+
+how can i use this in my project?
+---------------------------------
+
+please do not.
+
+<small>if you must, copy the header files into your project</small>
+
+building & running the tests
+----------------------------
+
+- `make run`
+
+please note that you need libc and *nix things, i do not provide custom
+allocators like the cool kids do but maybe eventually i will write an allocator
+for this library might be fun idk
+
+license
+-------
+
+wtfpl.  See LICENSE
