@@ -1,0 +1,17 @@
+cflags = "-std=c11 -Werror -Wall -Wpedantic -Wno-unused-function -Isrc/include"
+
+[artifacts.mc]
+type = "static_library"
+src = ["src/*.c"]
+
+[artifacts.tests]
+type = "executable"
+src = ["tests/*.c"]
+depends_on = ["mc"]
+ldflags = "-lmc"
+
+[modes.debug]
+cflags = "-O0 -g"
+
+[modes.release]
+cflags = "-O3 -march=native"
