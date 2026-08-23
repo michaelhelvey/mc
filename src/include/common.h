@@ -61,7 +61,7 @@ typedef struct string_view_t {
 /**
  * Helper to create a string_view_t from a string literal: `string_view_t str = SV_LIT("literal");`
  */
-#define SV_LIT(s) ((string_view_t){ .buf = (s), .buf_len = sizeof(s) - 1 })
+#define SV_LIT(s) ((const string_view_t){ .buf = (s), .buf_len = sizeof(s) - 1 })
 
 /**
  * Compares two string views. Logically similar to `strcmp` from the C standard
@@ -71,7 +71,57 @@ typedef struct string_view_t {
  *
  * Performance is O(n) in the worst case, and O(1) if the strings are different lengths.
  */
-extern ssize_t str_view_cmp(string_view_t *a, string_view_t *b);
+bool str_view_cmp(const string_view_t *a, const string_view_t *b);
+
+/**
+ * A generic buffered reader implementation that provides the usual facilities
+ * for reading up to particular characters and patterns while limiting syscalls.
+ */
+typedef struct buffered_reader_t {
+    /* generic blocking read function.  a negative return is assumed to be an
+     * error, and a read of 0 bytes is assumed to represent EOF */
+    ssize_t (*read)(char *, size_t);
+    /* whether it is possible to read more from the underlying IO source.  once
+     * set to false due to a blocking read of 0 bytes, stays false forever */
+    bool readable;
+    /* buffer and length used to hold bytes before they are consumed */
+    char *buf;
+    size_t buf_len;
+    /* cursor into buf representing where we should start reading for callers*/
+    size_t read_cursor;
+    /* cursor into buf representing where we should start writing when reading
+     * more from the underlying IO source */
+    size_t write_cursor;
+    /* how many bytes at a time to attempt to read out of the underlying source */
+    size_t chunk_size;
+} buffered_reader_t;
+
+/**
+ * Reads up to `n` bytes out of the underlying buffer into `buf`.  Returns
+ * either the number of bytes read or -1 in the case of an error.
+ *
+ * It is considered an error to attempt to read more than the reader's chunk
+ * size.
+ */
+ssize_t buffered_reader_read_nbytes(buffered_reader_t *reader, char *buf, size_t n);
+
+/**
+ * Pushes back `n` previously-consumed bytes so they will be returned by
+ * subsequent reads.  The bytes must still be present in the reader's buffer
+ * (i.e. between `read_cursor` and `write_cursor`); asking to unread more
+ * bytes than are currently buffered is an error.  Returns 0 on success, or
+ * -1 if `n` exceeds the number of bytes available to unread.
+ */
+int buffered_reader_unread(buffered_reader_t *reader, size_t n);
+
+/**
+ * Consumes characters from their reader, copying them into `buf`, until the
+ * first instance of `needle` is encountered.  `needle` is itself copied into
+ * buf.  The number of bytes consumed is returned, or -1 in the case of an
+ * error.
+ */
+ssize_t buffered_reader_read_until(buffered_reader_t *reader, const string_view_t *needle,
+                                   char *buf, size_t buf_len);
 
 #ifdef __cplusplus
 }

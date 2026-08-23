@@ -55,28 +55,28 @@ typedef struct arena_t {
 /**
  * Rounds `addr` up to the nearest multiple of `align`. `align` must be a non-zero power of two.
  */
-extern uintptr_t arena_align_up(uintptr_t addr, size_t align);
+uintptr_t arena_align_up(uintptr_t addr, size_t align);
 
 /**
  * Creates a new memory region of the given size. Returns NULL on failure.
  */
-extern region_t *region_create(size_t size);
+region_t *region_create(size_t size);
 
 /**
  * Initializes an arena_t. Must be called before any allocation.
  */
-extern void arena_init(arena_t *arena);
+void arena_init(arena_t *arena);
 
 /**
  * Allocates `size` bytes aligned to `align` from the arena. Returns NULL on
  * failure or if the arena is NULL.
  */
-extern void *arena_alloc_aligned(arena_t *arena, size_t size, size_t align);
+void *arena_alloc_aligned(arena_t *arena, size_t size, size_t align);
 
 /**
  * Releases all memory held by the arena. The arena_t struct itself is not freed.
  */
-extern void arena_release(arena_t *arena);
+void arena_release(arena_t *arena);
 
 #define arena_alloc(arena, type) \
     ((type *)arena_alloc_aligned((arena), sizeof(type), _Alignof(type)))

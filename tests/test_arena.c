@@ -49,9 +49,10 @@ static void test_arena_multiple_regions(void)
     arena_release(&arena);
 }
 
-#define TEST(t) \
-    t();        \
-    printf("Passed: %s\n", #t);
+#define TEST(t)                          \
+    t();                                 \
+    printf("[ARENA]: Passed: %s\n", #t); \
+    ;
 
 void test_arena(void)
 {

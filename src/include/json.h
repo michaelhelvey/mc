@@ -32,6 +32,12 @@
  * over a buffer that produces tokens.  The caller is intended to maintain state
  * on the stack in order to interpret this series of tokens, such as whether a
  * given JSON_TOK_STRING is in a key or value position within an object.
+ *
+ * Because containers (objects and arrays) are simply a series of these tokens,
+ * skipping over a value that the caller doesn't care about -- e.g. a deeply
+ * nested object -- would normally require walking every token inside it.  To
+ * avoid that, `json_consume_value` will consume a whole value at once based
+ * only on its structure.
  */
 
 #include <stddef.h>
@@ -49,6 +55,7 @@ extern "C" {
     ITER(JSON_TOK_LIST_OPEN)      \
     ITER(JSON_TOK_LIST_CLOSE)     \
     ITER(JSON_TOK_COLON)          \
+    ITER(JSON_TOK_COMMA)          \
     ITER(JSON_TOK_STR)            \
     ITER(JSON_TOK_NUMBER)         \
     ITER(JSON_TOK_TRUE)           \
@@ -80,8 +87,26 @@ typedef struct json_tok_t {
  * then `json_parse` will return 0.  The memory in this buffer should be assumed
  * valid only until the next call to `json_parse`
  */
-extern size_t json_parse(char *buf, size_t buf_len, json_tok_t *out_token, char *str_buf,
-                         size_t str_buf_len);
+size_t json_parse(char *buf, size_t buf_len, json_tok_t *out_token, char *str_buf,
+                  size_t str_buf_len);
+
+/**
+ * Consume a single JSON value from the input buffer, returning the number of
+ * characters to advance so that `buf + <return>` is at the next token in the
+ * stream.
+ *
+ * A "value" in considered to be any of:
+ *   - a string literal
+ *   - an object            ({ ... })
+ *   - an array             ([ ... ])
+ *   - a bare scalar token  (number, true, false, null, ...)
+ * 
+ * This function assumes that the buffer is positioned at the start of such a
+ * value. If it is not, (e.g. the buffer is empty, whitespace only, or starts
+ * with a leading delimiter), or the value is malformed or unterminated, then
+ * this function returns 0. 
+ */
+size_t json_consume_value(char *buf, size_t buf_len);
 
 #ifdef __cplusplus
 }
