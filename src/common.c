@@ -5,7 +5,7 @@
 
 bool str_view_cmp(const string_view_t *a, const string_view_t *b)
 {
-    return a->buf_len == b->buf_len && memcmp(a->buf, b->buf, a->buf_len) == 0;
+    return a->len == b->len && memcmp(a->buf, b->buf, a->len) == 0;
 }
 
 bool sv_to_c_str(string_view_t sv, char *out, size_t out_cap)
@@ -16,27 +16,25 @@ bool sv_to_c_str(string_view_t sv, char *out, size_t out_cap)
 
     // An empty view is always representable as a NUL-terminated empty string,
     // regardless of whether sv.buf is NULL.
-    if (sv.buf_len == 0) {
+    if (sv.len == 0) {
         out[0] = '\0';
         return true;
     }
 
     assert(sv.buf != NULL && "string_view_t with non-zero length must have a non-NULL buf");
 
-    size_t copy_len = sv.buf_len < out_cap - 1 ? sv.buf_len : out_cap - 1;
+    size_t copy_len = sv.len < out_cap - 1 ? sv.len : out_cap - 1;
     memcpy(out, sv.buf, copy_len);
     out[copy_len] = '\0';
 
-    return sv.buf_len <= out_cap - 1;
+    return sv.len <= out_cap - 1;
 }
 
-ssize_t buffered_reader_read_nbytes(buffered_reader_t *reader, char *out, size_t out_cap,
-                                    size_t n)
+ssize_t buffered_reader_read_nbytes(buffered_reader_t *reader, char *out, size_t out_cap, size_t n)
 {
     assert(reader != NULL && out != NULL && reader->read != NULL &&
            "buffered_reader_t must be properly initialized before attempting to read out of it");
-    assert(out_cap >= n &&
-           "destination out must have capacity of at least n bytes");
+    assert(out_cap >= n && "destination out must have capacity of at least n bytes");
 
     if (n > reader->chunk_size) {
         return -1;
@@ -105,30 +103,30 @@ ssize_t buffered_reader_read_until(buffered_reader_t *reader, string_view_t need
     size_t check_pos = 0;
 
     for (;;) {
-        if (total + needle.buf_len > out_cap) {
+        if (total + needle.len > out_cap) {
             return -1;
         }
 
-        ssize_t result = buffered_reader_read_nbytes(reader, out + total, out_cap - total,
-                                                     needle.buf_len);
+        ssize_t result =
+            buffered_reader_read_nbytes(reader, out + total, out_cap - total, needle.len);
         if (result <= 0) {
             return result;
         }
 
         total += (size_t)result;
 
-        if (total < needle.buf_len) {
+        if (total < needle.len) {
             continue;
         }
 
-        size_t end = total - needle.buf_len;
+        size_t end = total - needle.len;
         for (; check_pos <= end; check_pos++) {
-            if (memcmp(out + check_pos, needle.buf, needle.buf_len) == 0) {
+            if (memcmp(out + check_pos, needle.buf, needle.len) == 0) {
                 // push back any extra bytes that we read past the match and
                 // return our total
-                size_t overread = total - (check_pos + needle.buf_len);
+                size_t overread = total - (check_pos + needle.len);
                 buffered_reader_unread(reader, overread);
-                return (ssize_t)(check_pos + needle.buf_len);
+                return (ssize_t)(check_pos + needle.len);
             }
         }
     }

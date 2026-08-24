@@ -57,7 +57,7 @@ int http_init_plaintext_transport(http_transport_t *transport, string_view_t dom
     char domain_buf[MC_MAX_DOMAIN_LEN];
     if (!SV_AS_C_STR(domain, domain_buf)) {
         snprintf(err_buf, sizeof(err_buf), "domain of length %zu exceeds maximum of %zu",
-                 domain.buf_len, sizeof(domain_buf) - 1);
+                 domain.len, sizeof(domain_buf) - 1);
         return -1;
     }
 
@@ -182,7 +182,7 @@ int http_header_next(http_header_iterator_t *iter, http_header_t *out_header)
         return -1;
     }
 
-    if (iter->cursor + 2 > iter->header_buf.buf_len) {
+    if (iter->cursor + 2 > iter->header_buf.len) {
         iter->complete = true;
         return -1;
     }
@@ -197,23 +197,23 @@ int http_header_next(http_header_iterator_t *iter, http_header_t *out_header)
     out_header->key.buf = iter->header_buf.buf + iter->cursor;
 
     // find end of key
-    while (iter->cursor < iter->header_buf.buf_len && iter->header_buf.buf[iter->cursor] != ':') {
+    while (iter->cursor < iter->header_buf.len && iter->header_buf.buf[iter->cursor] != ':') {
         iter->cursor++;
     }
 
     // if we ran off the end looking for a colon, then we have a malformed
     // headers section and there's no point continuing
-    if (iter->cursor >= iter->header_buf.buf_len) {
+    if (iter->cursor >= iter->header_buf.len) {
         iter->complete = true;
         return -1;
     }
 
-    out_header->key.buf_len = iter->cursor - key_start;
+    out_header->key.len = iter->cursor - key_start;
     iter->cursor++; // consume ':'
 
     // skip whitespace between key and value
     while (
-        iter->cursor < iter->header_buf.buf_len &&
+        iter->cursor < iter->header_buf.len &&
         (iter->header_buf.buf[iter->cursor] == ' ' || iter->header_buf.buf[iter->cursor] == '\t')) {
         iter->cursor++;
     }
@@ -221,16 +221,16 @@ int http_header_next(http_header_iterator_t *iter, http_header_t *out_header)
     // scan for final CRLF
     size_t value_start = iter->cursor;
     out_header->value.buf = iter->header_buf.buf + iter->cursor;
-    while (iter->cursor < iter->header_buf.buf_len && iter->header_buf.buf[iter->cursor] != '\r') {
+    while (iter->cursor < iter->header_buf.len && iter->header_buf.buf[iter->cursor] != '\r') {
         iter->cursor++;
     }
-    out_header->value.buf_len = iter->cursor - value_start;
+    out_header->value.len = iter->cursor - value_start;
 
     // consume final CRLF
-    if (iter->cursor + 2 <= iter->header_buf.buf_len) {
+    if (iter->cursor + 2 <= iter->header_buf.len) {
         iter->cursor += 2;
     } else {
-        iter->cursor = iter->header_buf.buf_len;
+        iter->cursor = iter->header_buf.len;
     }
 
     return 0;

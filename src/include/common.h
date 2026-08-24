@@ -53,29 +53,29 @@ extern "C" {
  */
 typedef struct string_view_t {
     const char *buf;
-    size_t buf_len;
+    size_t len;
 } string_view_t;
 
 /**
  * Helper to print a pointer to a string_view_t: `printf("sv: %.*s\n", SV_FMT_PTR(sv));`
  */
-#define SV_FMT_PTR(sv) (int)(sv->buf_len), (sv)->buf
+#define SV_FMT_PTR(sv) (int)(sv->len), (sv)->buf
 
 /**
  * Helper to print a string_view_t (not a pointer): `printf("sv: %.*s\n", SV_FMT(sv))`;
  */
-#define SV_FMT(sv) (int)(sv.buf_len), (sv).buf
+#define SV_FMT(sv) (int)(sv.len), (sv).buf
 
 /**
  * Helper to create a string_view_t from a string literal: `string_view_t str =
  * SV_LIT("literal");`
  */
-#define SV_LIT(s) ((const string_view_t){ .buf = (s), .buf_len = sizeof(s) - 1 })
+#define SV_LIT(s) ((const string_view_t){ .buf = (s), .len = sizeof(s) - 1 })
 
 /**
  * Heper to create a string_view_t from an arbitrary buffer and a length.
  */
-#define SV_FROM(s, sl) ((string_view_t){ .buf = (s), .buf_len = sl })
+#define SV_FROM(s, sl) ((string_view_t){ .buf = (s), .len = sl })
 
 /**
  * Compares two string views. Logically similar to `strcmp` from the C standard

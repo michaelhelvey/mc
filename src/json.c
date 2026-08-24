@@ -1,9 +1,9 @@
 #include "json.h"
 
-#define _JSON_SINGLE_CHAR_RETURN(typ)  \
+#define _JSON_SINGLE_CHAR_RETURN(typ)    \
     out_token->tok.buf = input + cursor; \
-    out_token->tok.buf_len = 1;        \
-    out_token->tok_type = typ;         \
+    out_token->tok.len = 1;              \
+    out_token->tok_type = typ;           \
     return cursor + 1;
 
 #define _JSON_CURRENT_CHAR (char)input[cursor]
@@ -21,7 +21,7 @@ size_t json_parse(char *input, size_t input_len, json_tok_t *out_token, char *st
 {
     out_token->tok_type = JSON_TOK_INVALID;
     out_token->tok.buf = input;
-    out_token->tok.buf_len = 0;
+    out_token->tok.len = 0;
 
     uintptr_t cursor = 0;
     while (cursor < input_len && isspace(_JSON_CURRENT_CHAR)) {
@@ -82,7 +82,7 @@ size_t json_parse(char *input, size_t input_len, json_tok_t *out_token, char *st
             return 0;
         }
 
-        out_token->tok.buf_len = str_len;
+        out_token->tok.len = str_len;
         return cursor + 1; // consume final quotation mark
     }
 
@@ -95,15 +95,14 @@ size_t json_parse(char *input, size_t input_len, json_tok_t *out_token, char *st
         // somewhat cheating here, because we're not actually interpreting the
         // numbers, just tokenizing them.  Any interpreter for the numbers
         // should handle the case of it not being a valid number.
-        while (cursor < input_len &&
-               (ishexnumber(_JSON_CURRENT_CHAR) || _JSON_CURRENT_CHAR == 'b' ||
-                _JSON_CURRENT_CHAR == 'x' || _JSON_CURRENT_CHAR == 'o' ||
-                _JSON_CURRENT_CHAR == '.')) {
+        while (cursor < input_len && (ishexnumber(_JSON_CURRENT_CHAR) ||
+                                      _JSON_CURRENT_CHAR == 'b' || _JSON_CURRENT_CHAR == 'x' ||
+                                      _JSON_CURRENT_CHAR == 'o' || _JSON_CURRENT_CHAR == '.')) {
             num_len++;
             cursor++;
         }
 
-        out_token->tok.buf_len = num_len;
+        out_token->tok.len = num_len;
         return cursor;
     }
 
@@ -115,7 +114,7 @@ size_t json_parse(char *input, size_t input_len, json_tok_t *out_token, char *st
     }
 
     // TODO: this could obviously be faster with interning
-    out_token->tok.buf_len = identifier_len;
+    out_token->tok.len = identifier_len;
     if (str_view_cmp(&out_token->tok, &SV_LIT("null"))) {
         out_token->tok_type = JSON_TOK_NULL;
     } else if (str_view_cmp(&out_token->tok, &SV_LIT("true"))) {
