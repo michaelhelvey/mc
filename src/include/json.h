@@ -87,8 +87,7 @@ typedef struct json_tok_t {
  * then `json_parse` will return 0.  The memory in this buffer should be assumed
  * valid only until the next call to `json_parse`
  */
-size_t json_parse(char *buf, size_t buf_len, json_tok_t *out_token, char *str_buf,
-                  size_t str_buf_len);
+size_t json_parse(string_view_t input, json_tok_t *out_token, string_view_t str_buf);
 
 /**
  * Consume a single JSON value from the input buffer, returning the number of
@@ -100,13 +99,13 @@ size_t json_parse(char *buf, size_t buf_len, json_tok_t *out_token, char *str_bu
  *   - an object            ({ ... })
  *   - an array             ([ ... ])
  *   - a bare scalar token  (number, true, false, null, ...)
- * 
+ *
  * This function assumes that the buffer is positioned at the start of such a
  * value. If it is not, (e.g. the buffer is empty, whitespace only, or starts
  * with a leading delimiter), or the value is malformed or unterminated, then
- * this function returns 0. 
+ * this function returns 0.
  */
-size_t json_consume_value(char *buf, size_t buf_len);
+size_t json_consume_value(string_view_t input);
 
 #ifdef __cplusplus
 }

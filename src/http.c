@@ -47,9 +47,18 @@ ssize_t plaintext_transport_write(http_transport_t *transport, const char *buf, 
     return (ssize_t)total;
 }
 
-int http_init_plaintext_transport(http_transport_t *transport, const char *domain)
+#define MC_MAX_DOMAIN_LEN 256
+
+int http_init_plaintext_transport(http_transport_t *transport, string_view_t domain)
 {
     memset(transport, 0, sizeof(http_transport_t));
+
+    char domain_buf[MC_MAX_DOMAIN_LEN];
+    if (!SV_AS_C_STR(domain, domain_buf)) {
+        snprintf(err_buf, sizeof(err_buf), "domain of length %zu exceeds maximum of %zu",
+                 domain.buf_len, sizeof(domain_buf) - 1);
+        return -1;
+    }
 
     struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
@@ -60,13 +69,13 @@ int http_init_plaintext_transport(http_transport_t *transport, const char *domai
     hints.ai_flags = AI_DEFAULT;
 
     struct addrinfo *head0;
-    int result = getaddrinfo(domain, "http", &hints, &head0);
+    int result = getaddrinfo(domain_buf, "http", &hints, &head0);
     if (result != 0) {
         snprintf(err_buf, sizeof(err_buf), "%s", gai_strerror(result));
         return -1;
     }
 
-    int s;
+    int s = -1;
     size_t addr_count = 0;
     char hbuf[INET6_ADDRSTRLEN];
     struct addrinfo *head;
@@ -91,7 +100,7 @@ int http_init_plaintext_transport(http_transport_t *transport, const char *domai
     freeaddrinfo(head0);
     if (s < 0) {
         snprintf(err_buf, sizeof(err_buf), "could not connect to any of %lu addreses for %s",
-                 addr_count, domain);
+                 addr_count, domain_buf);
         return -1;
     }
 
@@ -110,12 +119,13 @@ int http_close_plaintext_transport(http_transport_t *transport)
     return 0;
 }
 
-int http_write_request_line(http_client_t *client, const char *method, const char *path)
+int http_write_request_line(http_client_t *client, string_view_t method, string_view_t path)
 {
     client->cursor = 0;
 
-    size_t used = snprintf(client->head_buf + client->cursor, client->head_buf_len - client->cursor,
-                           "%s %s HTTP/1.1\r\n", method, path);
+    size_t used =
+        snprintf(client->head_buf + client->cursor, client->head_buf_len - client->cursor,
+                 "%.*s %.*s HTTP/1.1\r\n", SV_FMT(method), SV_FMT(path));
     if (used >= client->head_buf_len - client->cursor) {
         snprintf(err_buf, sizeof err_buf,
                  "remaining head_buf_len of %lu was less than required for request line",
@@ -127,10 +137,11 @@ int http_write_request_line(http_client_t *client, const char *method, const cha
     return 0;
 }
 
-int http_write_header(http_client_t *client, const char *key, const char *value)
+int http_write_header(http_client_t *client, string_view_t key, string_view_t value)
 {
-    size_t used = snprintf(client->head_buf + client->cursor, client->head_buf_len - client->cursor,
-                           "%s: %s\r\n", key, value);
+    size_t used =
+        snprintf(client->head_buf + client->cursor, client->head_buf_len - client->cursor,
+                 "%.*s: %.*s\r\n", SV_FMT(key), SV_FMT(value));
     if (used >= client->head_buf_len - client->cursor) {
         snprintf(err_buf, sizeof err_buf,
                  "remaining head_buf_len of %lu was less than required for header line",
@@ -159,13 +170,12 @@ ssize_t http_flush_request(http_client_t *client)
 
 // named of course after the perfectly named correllary in the zig std library.
 // it would be criminal to name this function anything else
-ssize_t http_receive_head(http_client_t *client, char *headers_buf, size_t headers_buf_len)
+ssize_t http_receive_head(http_client_t *client, string_view_t headers_buf)
 {
     buffered_reader_t reader = buffered_reader_defaults_from(
         client->transport, client->transport->read, client->head_buf, client->head_buf_len);
 
-    ssize_t result =
-        buffered_reader_read_until(&reader, &SV_LIT("\r\n\r\n"), headers_buf, headers_buf_len);
+    ssize_t result = buffered_reader_read_until(&reader, SV_LIT("\r\n\r\n"), headers_buf);
 
     return result;
 }

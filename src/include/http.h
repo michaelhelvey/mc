@@ -29,6 +29,8 @@
 #include <sys/types.h>
 #include <stdbool.h>
 
+#include "common.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -78,7 +80,7 @@ typedef struct http_transport_t {
  * provided `transport` with the given socket.  Can be called again if the
  * connection drops to re-initialize the connection.
  */
-int http_init_plaintext_transport(http_transport_t *transport, const char *domain);
+int http_init_plaintext_transport(http_transport_t *transport, string_view_t domain);
 
 /**
  * Closes the socket associated with the given transport.  Panics with a runtime
@@ -108,13 +110,13 @@ typedef struct http_client_t {
  * Writes the request line to the client's internal header buffer.   Does not perform
  * a syscall.  Returns -1 on error, or 0 on success.
  */
-int http_write_request_line(http_client_t *client, const char *method, const char *path);
+int http_write_request_line(http_client_t *client, string_view_t method, string_view_t path);
 
 /**
  * Writes the given key/value pair to the request's internal header buffer.
  * Does not perform a syscall.  Returns -1 on error or 0 on success.
  */
-int http_write_header(http_client_t *client, const char *key, const char *value);
+int http_write_header(http_client_t *client, string_view_t key, string_view_t value);
 
 /**
  * Writes the final CRLF to the end of the headers stored in the request buffer
@@ -127,11 +129,11 @@ ssize_t http_flush_request(http_client_t *client);
 /**
  * Reads the response status line and headers into `headers_buf`, using
  * `scratch_buf` as an intermediary buffer for the reader.
- * 
+ *
  * Returns the number of bytes read, including the final CLRF, or -1 in the case
  * of an error.
  */
-ssize_t http_receive_head(http_client_t *client, char *headers_buf, size_t headers_buf_len);
+ssize_t http_receive_head(http_client_t *client, string_view_t headers_buf);
 
 #ifdef __cplusplus
 }

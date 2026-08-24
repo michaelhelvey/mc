@@ -5,13 +5,12 @@
 
 #include "json.h"
 
-#define GIVEN(buf)                \
-    json_tok_t out_token;         \
-    char *buffer = buf;           \
-    size_t buf_len = sizeof(buf); \
-    size_t str_buf_len = 1024;    \
-    char str_buf[str_buf_len];    \
-    size_t r_value = json_parse(buffer, buf_len, &out_token, str_buf, str_buf_len);
+#define GIVEN(buf)                                      \
+    json_tok_t out_token;                               \
+    char *buffer = buf;                                 \
+    string_view_t input = SV_FROM(buffer, sizeof(buf)); \
+    char str_buf[1024];                                 \
+    size_t r_value = json_parse(input, &out_token, SV_FROM(str_buf, sizeof(str_buf)));
 
 static void test_tokenize_true(void)
 {
@@ -103,13 +102,13 @@ static void test_silly_escapes(void)
 
 static void test_consume_scalar_value(void)
 {
-    assert(json_consume_value("123", 3) == 3 && "expected to consume '123'");
+    assert(json_consume_value(SV_FROM("123", 3)) == 3 && "expected to consume '123'");
 }
 
 static void test_consume_string_skips_delimiter(void)
 {
     char *buf = "\"first\", \"second\"";
-    size_t offset = json_consume_value(buf, strlen(buf));
+    size_t offset = json_consume_value(SV_FROM(buf, strlen(buf)));
     assert(offset == 9 && "expected to skip string, comma, and whitespace");
     assert(buf[offset] == '"' && "expected to land on the start of the second string");
 }
@@ -120,11 +119,11 @@ static void test_consume_walks_key_value_pairs(void)
     char *buf = "\"a\": 1, \"b\": [2,3]";
 
     // each call consumes a key + ':' or value + ','
-    size_t offset = json_consume_value(buf, strlen(buf));
+    size_t offset = json_consume_value(SV_FROM(buf, strlen(buf)));
     assert(buf[offset] == '1' && "key + ':' should land at the value");
-    offset += json_consume_value(buf + offset, strlen(buf) - offset);
+    offset += json_consume_value(SV_FROM(buf + offset, strlen(buf) - offset));
     assert(buf[offset] == '"' && "value + ',' should land at the next key");
-    offset += json_consume_value(buf + offset, strlen(buf) - offset);
+    offset += json_consume_value(SV_FROM(buf + offset, strlen(buf) - offset));
     assert(buf[offset] == '[' && "key + ':' should land at the array value");
 }
 
@@ -135,13 +134,15 @@ static void test_consume_to_third_item_in_array(void)
     json_tok_t out_token;
     char str_buf[1024];
 
-    size_t offset = json_parse(buf, buf_len, &out_token, str_buf, 1024); // consume '['
+    size_t offset =
+        json_parse(SV_FROM(buf, buf_len), &out_token, SV_FROM(str_buf, 1024)); // consume '['
     assert(out_token.tok_type == JSON_TOK_LIST_OPEN && "expected to open the array");
 
-    offset += json_consume_value(buf + offset, buf_len - offset); // skip item 1
-    offset += json_consume_value(buf + offset, buf_len - offset); // skip item 2 (nested)
+    offset += json_consume_value(SV_FROM(buf + offset, buf_len - offset)); // skip item 1
+    offset += json_consume_value(SV_FROM(buf + offset, buf_len - offset)); // skip item 2 (nested)
 
-    size_t r = json_parse(buf + offset, buf_len - offset, &out_token, str_buf, 1024);
+    size_t r =
+        json_parse(SV_FROM(buf + offset, buf_len - offset), &out_token, SV_FROM(str_buf, 1024));
     assert(r > 0 && "expected to read a token at the 3rd item");
     assert(out_token.tok_type == JSON_TOK_STR && "expected the 3rd item to be a string");
     assert(str_view_cmp(&out_token.tok, &SV_LIT("third")) && "expected the 3rd item to be 'third'");
@@ -153,20 +154,83 @@ static void test_consume_ignores_brackets_in_strings(void)
     json_tok_t out_token;
     char str_buf[1024];
 
-    size_t offset = json_consume_value(buf, strlen(buf));
+    size_t offset = json_consume_value(SV_FROM(buf, strlen(buf)));
     assert(buf[offset] == 't' && "expected to land on 'true' despite brackets in the string");
-    size_t r = json_parse(buf + offset, strlen(buf) - offset, &out_token, str_buf, 1024);
+    size_t r =
+        json_parse(SV_FROM(buf + offset, strlen(buf) - offset), &out_token, SV_FROM(str_buf, 1024));
     assert(r > 0 && "expected to parse a token after the skip");
     assert(out_token.tok_type == JSON_TOK_TRUE && "expected 'true' token after the skip");
 }
 
 static void test_consume_errors(void)
 {
-    assert(json_consume_value("", 0) == 0 && "empty buffer returns 0");
-    assert(json_consume_value("   ", 3) == 0 && "whitespace-only buffer returns 0");
-    assert(json_consume_value("]", 1) == 0 && "leading delimiter returns 0");
-    assert(json_consume_value("{ \"a\": 1", 8) == 0 && "unterminated object returns 0");
-    assert(json_consume_value("\"abc", 4) == 0 && "unterminated string returns 0");
+    assert(json_consume_value(SV_FROM("", 0)) == 0 && "empty buffer returns 0");
+    assert(json_consume_value(SV_FROM("   ", 3)) == 0 && "whitespace-only buffer returns 0");
+    assert(json_consume_value(SV_FROM("]", 1)) == 0 && "leading delimiter returns 0");
+    assert(json_consume_value(SV_FROM("{ \"a\": 1", 8)) == 0 && "unterminated object returns 0");
+    assert(json_consume_value(SV_FROM("\"abc", 4)) == 0 && "unterminated string returns 0");
+}
+
+// no NUL-terminated string tests:
+
+static void test_parse_empty_input(void)
+{
+    json_tok_t tok;
+    char str_buf[16];
+    assert(json_parse(SV_FROM("", 0), &tok, SV_FROM(str_buf, sizeof(str_buf))) == 0);
+    assert(tok.tok_type == JSON_TOK_INVALID && "empty input produces INVALID token");
+}
+
+static void test_parse_whitespace_only(void)
+{
+    json_tok_t tok;
+    char str_buf[16];
+    assert(json_parse(SV_FROM("   ", 3), &tok, SV_FROM(str_buf, sizeof(str_buf))) == 0);
+    assert(tok.tok_type == JSON_TOK_INVALID && "whitespace-only input produces INVALID token");
+}
+
+static void test_parse_unterminated_string(void)
+{
+    json_tok_t tok;
+    char str_buf[16];
+    assert(json_parse(SV_FROM("\"abc", 4), &tok, SV_FROM(str_buf, sizeof(str_buf))) == 0);
+    assert(tok.tok_type == JSON_TOK_INVALID && "unterminated string produces INVALID token");
+}
+
+static void test_parse_identifier_at_eob(void)
+{
+    json_tok_t tok;
+    char str_buf[16];
+    assert(json_parse(SV_FROM("null", 4), &tok, SV_FROM(str_buf, sizeof(str_buf))) == 4);
+    assert(tok.tok_type == JSON_TOK_NULL && "identifier at end-of-buffer is recognized");
+}
+
+static void test_parse_number_at_eob(void)
+{
+    json_tok_t tok;
+    char str_buf[16];
+    assert(json_parse(SV_FROM("123", 3), &tok, SV_FROM(str_buf, sizeof(str_buf))) == 3);
+    assert(tok.tok_type == JSON_TOK_NUMBER && "number at end-of-buffer is recognized");
+}
+
+static void test_parse_subview_of_larger_buffer(void)
+{
+    // test that the tokenizer doesn't read past the input view's length by
+    // parsing a "true" in the midst of a bunch of other non-NUL characters
+    char big[64];
+    memset(big, 'X', sizeof(big));
+    static const char needle[] = "true";
+    size_t offset = 17; // arbitrary position inside the 'X' padding
+    memcpy(big + offset, needle, sizeof(needle));
+
+    string_view_t view = SV_FROM(big + offset, 4);
+
+    json_tok_t tok;
+    char str_buf[16];
+    assert(json_parse(view, &tok, SV_FROM(str_buf, sizeof(str_buf))) == 4);
+    assert(tok.tok_type == JSON_TOK_TRUE && "true within non-NUL-terminated buffer is recognized");
+    // if we returned successfully, that means we didn't read into the X's or
+    // else we'd have gotten an invalid token error
 }
 
 #define TEST(t) \
@@ -200,4 +264,14 @@ void test_json_parser(void)
     TEST(test_consume_to_third_item_in_array);
     TEST(test_consume_ignores_brackets_in_strings);
     TEST(test_consume_errors);
+
+    // non-NUL-terminated inputs (these used to pass by accident because of an
+    // implicit trailing NUL; the SV_FROM calls in the tests construct views
+    // with explicit lengths):
+    TEST(test_parse_empty_input);
+    TEST(test_parse_whitespace_only);
+    TEST(test_parse_unterminated_string);
+    TEST(test_parse_identifier_at_eob);
+    TEST(test_parse_number_at_eob);
+    TEST(test_parse_subview_of_larger_buffer);
 }

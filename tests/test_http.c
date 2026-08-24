@@ -9,7 +9,7 @@ void test_http_client(void)
 {
     http_transport_t transport;
     // surely google doesn't mind a little spam in my tests, right...right...
-    http_init_plaintext_transport(&transport, "google.com");
+    http_init_plaintext_transport(&transport, SV_LIT("google.com"));
 
     char scratch_buf[2048];
     http_client_t client = {
@@ -19,10 +19,10 @@ void test_http_client(void)
         .cursor = 0,
     };
 
-    if (http_write_request_line(&client, "GET", "/") != 0) {
+    if (http_write_request_line(&client, SV_LIT("GET"), SV_LIT("/")) != 0) {
         assert(false && "expected to be able to write request line");
     }
-    if (http_write_header(&client, "Host", "google.com") != 0) {
+    if (http_write_header(&client, SV_LIT("Host"), SV_LIT("google.com")) != 0) {
         assert(false && "expectd to be able to write a Host header");
     }
 
@@ -33,7 +33,7 @@ void test_http_client(void)
 
     printf("[HTTP]: successfully wrote %lu bytes to socket\n", (size_t)written);
     char headers_buf[2048];
-    ssize_t header_byte_len = http_receive_head(&client, headers_buf, sizeof(headers_buf));
+    ssize_t header_byte_len = http_receive_head(&client, SV_FROM(headers_buf, sizeof(headers_buf)));
 
     if (header_byte_len <= 0) {
         assert(false && "expected to be able to read a response");
