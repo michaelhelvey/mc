@@ -75,45 +75,46 @@ typedef struct http_transport_t {
 
 /**
  * Performs DNS resolution and connects to a given domain, initializing the
- * provided `transport4` with the given socket.  Can be called again if the
+ * provided `transport` with the given socket.  Can be called again if the
  * connection drops to re-initialize the connection.
  */
-int init_plaintext_transport(http_transport_t *transport, const char *domain);
+int http_init_plaintext_transport(http_transport_t *transport, const char *domain);
 
 /**
  * Closes the socket associated with the given transport.  Panics with a runtime
  * assertion error if the transport is not a plaintext transport (ctx_type !=
  * HTTP_CTX_SOCKET).
  */
-int close_plaintext_transport(http_transport_t *transport);
+int http_close_plaintext_transport(http_transport_t *transport);
 
 /**
  * Returns a string explanation of the last error encountered.
  */
-const char *get_http_error(void);
+const char *http_get_error(void);
 
 /**
  * Buffer used for constructing and parsing request and response headers.  After
  * a request is sent off, this buffer can be safely re-used for the response
  * headers.
  */
-typedef struct http_buf_t {
+typedef struct http_client_t {
+    http_transport_t *transport;
     char *head_buf;
     size_t head_buf_len;
     size_t cursor;
-} http_buf_t;
+} http_client_t;
 
 /**
- * Writes the request line to the request's internal header buffer.   Does not perform
+ * Writes the request line to the client's internal header buffer.   Does not perform
  * a syscall.  Returns -1 on error, or 0 on success.
  */
-int write_request_line(http_buf_t *request, const char *method, const char *path);
+int http_write_request_line(http_client_t *client, const char *method, const char *path);
 
 /**
  * Writes the given key/value pair to the request's internal header buffer.
  * Does not perform a syscall.  Returns -1 on error or 0 on success.
  */
-int write_header(http_buf_t *request, const char *key, const char *value);
+int http_write_header(http_client_t *client, const char *key, const char *value);
 
 /**
  * Writes the final CRLF to the end of the headers stored in the request buffer
@@ -121,7 +122,16 @@ int write_header(http_buf_t *request, const char *key, const char *value);
  * Returns -1 on error if there is not space for the final CRLF, or the result
  * of the transport's write function.
  */
-ssize_t flush_request_to_transport(http_transport_t *transport, http_buf_t *request);
+ssize_t http_flush_request(http_client_t *client);
+
+/**
+ * Reads the response status line and headers into `headers_buf`, using
+ * `scratch_buf` as an intermediary buffer for the reader.
+ * 
+ * Returns the number of bytes read, including the final CLRF, or -1 in the case
+ * of an error.
+ */
+ssize_t http_receive_head(http_client_t *client, char *headers_buf, size_t headers_buf_len);
 
 #ifdef __cplusplus
 }

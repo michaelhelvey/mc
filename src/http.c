@@ -7,10 +7,11 @@
 #include <errno.h>
 
 #include "http.h"
+#include "common.h"
 
 char err_buf[256];
 
-const char *get_http_error(void)
+const char *http_get_error(void)
 {
     return (const char *)&err_buf;
 }
@@ -46,7 +47,7 @@ ssize_t plaintext_transport_write(http_transport_t *transport, const char *buf, 
     return (ssize_t)total;
 }
 
-int init_plaintext_transport(http_transport_t *transport, const char *domain)
+int http_init_plaintext_transport(http_transport_t *transport, const char *domain)
 {
     memset(transport, 0, sizeof(http_transport_t));
 
@@ -102,57 +103,69 @@ int init_plaintext_transport(http_transport_t *transport, const char *domain)
     return 0;
 }
 
-int close_plaintext_transport(http_transport_t *transport)
+int http_close_plaintext_transport(http_transport_t *transport)
 {
     assert(transport->ctx_type == HTTP_CTX_SOCKET);
     close(transport->ctx.socket);
     return 0;
 }
 
-int write_request_line(http_buf_t *request, const char *method, const char *path)
+int http_write_request_line(http_client_t *client, const char *method, const char *path)
 {
-    request->cursor = 0;
+    client->cursor = 0;
 
-    size_t used = snprintf(request->head_buf + request->cursor,
-                           request->head_buf_len - request->cursor, "%s %s HTTP/1.1\r\n", method,
-                           path);
-    if (used >= request->head_buf_len - request->cursor) {
+    size_t used = snprintf(client->head_buf + client->cursor, client->head_buf_len - client->cursor,
+                           "%s %s HTTP/1.1\r\n", method, path);
+    if (used >= client->head_buf_len - client->cursor) {
         snprintf(err_buf, sizeof err_buf,
                  "remaining head_buf_len of %lu was less than required for request line",
-                 request->head_buf_len - request->cursor);
+                 client->head_buf_len - client->cursor);
         return -1;
     }
 
-    request->cursor += used;
+    client->cursor += used;
     return 0;
 }
 
-int write_header(http_buf_t *request, const char *key, const char *value)
+int http_write_header(http_client_t *client, const char *key, const char *value)
 {
-    size_t used = snprintf(request->head_buf + request->cursor,
-                           request->head_buf_len - request->cursor, "%s: %s\r\n", key, value);
-    if (used >= request->head_buf_len - request->cursor) {
+    size_t used = snprintf(client->head_buf + client->cursor, client->head_buf_len - client->cursor,
+                           "%s: %s\r\n", key, value);
+    if (used >= client->head_buf_len - client->cursor) {
         snprintf(err_buf, sizeof err_buf,
                  "remaining head_buf_len of %lu was less than required for header line",
-                 request->head_buf_len - request->cursor);
+                 client->head_buf_len - client->cursor);
         return -1;
     }
 
-    request->cursor += used;
+    client->cursor += used;
     return 0;
 }
 
-ssize_t flush_request_to_transport(http_transport_t *transport, http_buf_t *request)
+ssize_t http_flush_request(http_client_t *client)
 {
-    size_t used = snprintf(request->head_buf + request->cursor,
-                           request->head_buf_len - request->cursor, "\r\n");
+    size_t used =
+        snprintf(client->head_buf + client->cursor, client->head_buf_len - client->cursor, "\r\n");
 
-    if (used >= request->head_buf_len - request->cursor) {
+    if (used >= client->head_buf_len - client->cursor) {
         snprintf(err_buf, sizeof err_buf,
                  "remaining head_buf_len of %lu was less than required for final CRLF",
-                 request->head_buf_len - request->cursor);
+                 client->head_buf_len - client->cursor);
     }
 
-    request->cursor += used;
-    return transport->write(transport, request->head_buf, request->cursor);
+    client->cursor += used;
+    return client->transport->write(client->transport, client->head_buf, client->cursor);
+}
+
+// named of course after the perfectly named correllary in the zig std library.
+// it would be criminal to name this function anything else
+ssize_t http_receive_head(http_client_t *client, char *headers_buf, size_t headers_buf_len)
+{
+    buffered_reader_t reader = buffered_reader_defaults_from(
+        client->transport, client->transport->read, client->head_buf, client->head_buf_len);
+
+    ssize_t result =
+        buffered_reader_read_until(&reader, &SV_LIT("\r\n\r\n"), headers_buf, headers_buf_len);
+
+    return result;
 }

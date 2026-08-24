@@ -2,7 +2,6 @@
 
 ## HTTP
 
-- [ ] write a buffered reader implementation
 - [ ] use said reader to write a header iterator
 - [ ] write a `http_response_body_read_all(buf, max)` function
 - [ ] write a OpenSSL transport

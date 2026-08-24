@@ -47,7 +47,8 @@ ssize_t buffered_reader_read_nbytes(buffered_reader_t *reader, char *buf, size_t
             reader->write_cursor = available_bytes_count;
         }
 
-        ssize_t result = reader->read(reader->buf + reader->write_cursor, reader->chunk_size);
+        ssize_t result =
+            reader->read(reader->ctx, reader->buf + reader->write_cursor, reader->chunk_size);
 
         if (result < 0) {
             return -1;

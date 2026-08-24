@@ -9,16 +9,17 @@
     t();        \
     printf("[COMMON]: Passed: %s\n", #t);
 
-#define GIVEN_READER(name, data)              \
-    char name##_buf[sizeof(data) - 1] = data; \
-    buffered_reader_t name = {                \
-        .buf = name##_buf,                    \
-        .buf_len = sizeof(name##_buf),        \
-        .readable = true,                     \
-        .read = mock_read,                    \
-        .chunk_size = 1024,                   \
-        .read_cursor = 0,                     \
-        .write_cursor = sizeof(name##_buf),   \
+#define GIVEN_READER(name, data)                    \
+    char name##_buf[sizeof(data) - 1] = data;       \
+    buffered_reader_t name = {                      \
+        .ctx = (void *)NULL,                        \
+        .buf = name##_buf,                          \
+        .buf_len = sizeof(name##_buf),              \
+        .readable = true,                           \
+        .read = (buffered_reader_read_fn)mock_read, \
+        .chunk_size = 1024,                         \
+        .read_cursor = 0,                           \
+        .write_cursor = sizeof(name##_buf),         \
     };
 
 ssize_t mock_read(char *buf, size_t len)

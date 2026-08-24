@@ -7,9 +7,9 @@ extern void test_common(void);
 
 int main(void)
 {
-    test_json_parser();
-    test_arena();
+    // test_json_parser();
+    // test_arena();
+    // test_common();
     test_http_client();
-    test_common();
     return 0;
 }

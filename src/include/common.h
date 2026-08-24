@@ -42,6 +42,10 @@ extern "C" {
 
 /**
  * A non-null-terminated view into a character buffer owned elsewhere.
+ * 
+ * TODO: we pass around a lot of buffers and lengths, and I'm not sure that
+ * there's value in not just using non-const string_view_t's for that...TODO
+ * make a decision and be consistent about use of string_views in our APIs
  */
 typedef struct string_view_t {
     char *buf;
@@ -59,9 +63,15 @@ typedef struct string_view_t {
 #define SV_FMT(sv) (int)(sv.buf_len), (sv).buf
 
 /**
- * Helper to create a string_view_t from a string literal: `string_view_t str = SV_LIT("literal");`
+ * Helper to create a string_view_t from a string literal: `string_view_t str =
+ * SV_LIT("literal");`
  */
 #define SV_LIT(s) ((const string_view_t){ .buf = (s), .buf_len = sizeof(s) - 1 })
+
+/**
+ * Heper to create a string_view_t from an arbitrary buffer and a length.
+ */
+#define SV_FROM(s, sl) ((string_view_t){ .buf = (s), .buf_len = sl })
 
 /**
  * Compares two string views. Logically similar to `strcmp` from the C standard
@@ -73,14 +83,18 @@ typedef struct string_view_t {
  */
 bool str_view_cmp(const string_view_t *a, const string_view_t *b);
 
+typedef ssize_t (*buffered_reader_read_fn)(void *, char *, size_t);
+
 /**
  * A generic buffered reader implementation that provides the usual facilities
  * for reading up to particular characters and patterns while limiting syscalls.
  */
 typedef struct buffered_reader_t {
+    /* A pointer to some context that will be passed to our read function. e.g. a FILE* */
+    void *ctx;
     /* generic blocking read function.  a negative return is assumed to be an
      * error, and a read of 0 bytes is assumed to represent EOF */
-    ssize_t (*read)(char *, size_t);
+    buffered_reader_read_fn read;
     /* whether it is possible to read more from the underlying IO source.  once
      * set to false due to a blocking read of 0 bytes, stays false forever */
     bool readable;
@@ -95,6 +109,17 @@ typedef struct buffered_reader_t {
     /* how many bytes at a time to attempt to read out of the underlying source */
     size_t chunk_size;
 } buffered_reader_t;
+
+#define BUFFERED_READER_DEFAULT_CHUNK_SIZE 4096
+#define buffered_reader_defaults_from(ctxarg, read_fn, bufarg, buf_lenarg) \
+    ((buffered_reader_t){ .ctx = (void *)ctxarg,                           \
+                          .read = (buffered_reader_read_fn)read_fn,        \
+                          .buf = bufarg,                                   \
+                          .buf_len = buf_lenarg,                           \
+                          .readable = true,                                \
+                          .read_cursor = 0,                                \
+                          .write_cursor = 0,                               \
+                          .chunk_size = BUFFERED_READER_DEFAULT_CHUNK_SIZE })
 
 /**
  * Reads up to `n` bytes out of the underlying buffer into `buf`.  Returns
