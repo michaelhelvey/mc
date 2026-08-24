@@ -41,16 +41,18 @@ extern "C" {
 #endif
 
 /**
- * A non-null-terminated view into a character buffer owned elsewhere.
- *
- * Convention: throughout this library, anywhere we would otherwise take a
- * `(char *buf, size_t buf_len)` pair, we take a `string_view_t` instead --
- * by value, never by pointer. The view is intentionally non-const (`buf` is
- * `char *`, not `const char *`); callers wishing to express read-only intent
- * should point `buf` at const memory rather than rely on the view type.
+ * A non-null-terminated, read-only immutable view into a character buffer owned
+ * elsewhere.
+ * 
+ * Usage rule in this codebase: string_view_t is used whenever you're
+ * representing an *immutable string value*.  When you're mutating a buffer of
+ * memory, we represent this with a standard char*, size_t pair. It should be
+ * obvious at the callsite which is which -- string_view_t is never an output
+ * parameter that we write into, and we enforce with this a `const` annotation
+ * on `*buf`.
  */
 typedef struct string_view_t {
-    char *buf;
+    const char *buf;
     size_t buf_len;
 } string_view_t;
 
@@ -138,14 +140,15 @@ typedef struct buffered_reader_t {
                           .chunk_size = BUFFERED_READER_DEFAULT_CHUNK_SIZE })
 
 /**
- * Reads up to `n` bytes out of the underlying buffer into `out_buf`. Returns
+ * Reads up to `n` bytes out of the underlying buffer into `out`. Returns
  * either the number of bytes read or -1 in the case of an error.
  *
  * `n` is the number of bytes the caller wishes to consume; the destination
- * `out_buf` must have capacity of at least `n` bytes (asserted). It is also
- * considered an error to request more bytes than the reader's chunk size.
+ * `out` must have capacity of at least `out_cap` bytes, and `out_cap` must be
+ * at least `n`. It is also considered an error to request more bytes than the
+ * reader's chunk size.
  */
-ssize_t buffered_reader_read_nbytes(buffered_reader_t *reader, string_view_t out_buf, size_t n);
+ssize_t buffered_reader_read_nbytes(buffered_reader_t *reader, char *out, size_t out_cap, size_t n);
 
 /**
  * Pushes back `n` previously-consumed bytes so they will be returned by
@@ -157,14 +160,14 @@ ssize_t buffered_reader_read_nbytes(buffered_reader_t *reader, string_view_t out
 int buffered_reader_unread(buffered_reader_t *reader, size_t n);
 
 /**
- * Consumes characters from their reader, copying them into `out_buf`, until
- * the first instance of `needle` is encountered. `needle` is itself copied
- * into `out_buf`. The number of bytes consumed is returned, or -1 in the
- * case of an error (including the case where the buffer is too small to
- * accommodate the needle).
+ * Consumes characters from their reader, copying them into `out` (with capacity
+ * `out_cap`), until the first instance of `needle` is encountered. `needle` is
+ * a read-only string value and is itself copied into `out`. The number of bytes
+ * consumed is returned, or -1 in the case of an error (including the case where
+ * the buffer is too small to accommodate the needle).
  */
-ssize_t buffered_reader_read_until(buffered_reader_t *reader, string_view_t needle,
-                                   string_view_t out_buf);
+ssize_t buffered_reader_read_until(buffered_reader_t *reader, string_view_t needle, char *out,
+                                   size_t out_cap);
 
 #ifdef __cplusplus
 }

@@ -32,12 +32,11 @@ void test_reader_read_until(void)
     GIVEN_READER(reader, "Hello, world");
 
     char result[256];
-    ssize_t r =
-        buffered_reader_read_until(&reader, SV_LIT(", "), SV_FROM(result, sizeof(result)));
+    ssize_t r = buffered_reader_read_until(&reader, SV_LIT(", "), result, sizeof(result));
     assert(r == 7 && "expected to consume 7 bytes including the needle");
 
     // we should expect the reader to be at "world"
-    r = buffered_reader_read_nbytes(&reader, SV_FROM(result, 5), 5);
+    r = buffered_reader_read_nbytes(&reader, result, sizeof(result), 5);
     assert(r == 5 && "expected to be able to read 5 bytes");
     assert(memcmp(result, "world", 5) == 0 && "expected reader to be left at 'world'");
 }
@@ -51,11 +50,11 @@ void test_reader_unread(void)
     // Consume 5 bytes ("Hello"), then push 3 back.  The next read of 5 bytes
     // should give us the 2 bytes that weren't unread plus the 3 we pushed
     // back: "llo, ".
-    assert(buffered_reader_read_nbytes(&reader, SV_FROM(result, 5), 5) == 5);
+    assert(buffered_reader_read_nbytes(&reader, result, sizeof(result), 5) == 5);
     assert(memcmp(result, "Hello", 5) == 0);
     assert(buffered_reader_unread(&reader, 3) == 0);
 
-    assert(buffered_reader_read_nbytes(&reader, SV_FROM(result, 5), 5) == 5);
+    assert(buffered_reader_read_nbytes(&reader, result, sizeof(result), 5) == 5);
     assert(memcmp(result, "llo, ", 5) == 0);
 
     // you can't unread more than is already in the reader

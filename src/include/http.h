@@ -127,13 +127,34 @@ int http_write_header(http_client_t *client, string_view_t key, string_view_t va
 ssize_t http_flush_request(http_client_t *client);
 
 /**
- * Reads the response status line and headers into `headers_buf`, using
- * `scratch_buf` as an intermediary buffer for the reader.
- *
- * Returns the number of bytes read, including the final CLRF, or -1 in the case
- * of an error.
+ * Creates a `buffered_reader_t` from the http client for reading the response.
  */
-ssize_t http_receive_head(http_client_t *client, string_view_t headers_buf);
+buffered_reader_t http_create_response_reader(http_client_t *client);
+
+/**
+ * Reads the response head (status line + headers, terminated by CRLF CRLF)
+ * out of `reader` and into `head_buf` (capacity `head_buf_cap`), which must be
+ * large enough to hold the entire head.
+ *
+ * Returns the number of bytes written into `head_buf` (including the terminal
+ * CRLF CRLF), or -1 on error. If the caller wants a `string_view_t` over the
+ * parsed head it can construct one from `(head_buf, <return value>)`; we only
+ * guarantee that the first `<return>` bytes of `head_buf` are valid.
+ */
+ssize_t http_receive_head(buffered_reader_t *reader, char *head_buf, size_t head_buf_cap);
+
+typedef struct http_header_iterator_t {
+    size_t cursor;
+    string_view_t header_buf;
+    bool complete;
+} http_header_iterator_t;
+
+typedef struct http_header_t {
+    string_view_t key;
+    string_view_t value;
+} http_header_t;
+
+int http_header_next(http_header_iterator_t *iter, http_header_t *out_header);
 
 #ifdef __cplusplus
 }

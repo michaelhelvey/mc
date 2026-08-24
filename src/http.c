@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <netdb.h>
 #include <errno.h>
+#include <ctype.h>
 
 #include "http.h"
 #include "common.h"
@@ -123,9 +124,8 @@ int http_write_request_line(http_client_t *client, string_view_t method, string_
 {
     client->cursor = 0;
 
-    size_t used =
-        snprintf(client->head_buf + client->cursor, client->head_buf_len - client->cursor,
-                 "%.*s %.*s HTTP/1.1\r\n", SV_FMT(method), SV_FMT(path));
+    size_t used = snprintf(client->head_buf + client->cursor, client->head_buf_len - client->cursor,
+                           "%.*s %.*s HTTP/1.1\r\n", SV_FMT(method), SV_FMT(path));
     if (used >= client->head_buf_len - client->cursor) {
         snprintf(err_buf, sizeof err_buf,
                  "remaining head_buf_len of %lu was less than required for request line",
@@ -139,9 +139,8 @@ int http_write_request_line(http_client_t *client, string_view_t method, string_
 
 int http_write_header(http_client_t *client, string_view_t key, string_view_t value)
 {
-    size_t used =
-        snprintf(client->head_buf + client->cursor, client->head_buf_len - client->cursor,
-                 "%.*s: %.*s\r\n", SV_FMT(key), SV_FMT(value));
+    size_t used = snprintf(client->head_buf + client->cursor, client->head_buf_len - client->cursor,
+                           "%.*s: %.*s\r\n", SV_FMT(key), SV_FMT(value));
     if (used >= client->head_buf_len - client->cursor) {
         snprintf(err_buf, sizeof err_buf,
                  "remaining head_buf_len of %lu was less than required for header line",
@@ -162,20 +161,88 @@ ssize_t http_flush_request(http_client_t *client)
         snprintf(err_buf, sizeof err_buf,
                  "remaining head_buf_len of %lu was less than required for final CRLF",
                  client->head_buf_len - client->cursor);
+        return -1;
     }
 
     client->cursor += used;
     return client->transport->write(client->transport, client->head_buf, client->cursor);
 }
 
-// named of course after the perfectly named correllary in the zig std library.
-// it would be criminal to name this function anything else
-ssize_t http_receive_head(http_client_t *client, string_view_t headers_buf)
+buffered_reader_t http_create_response_reader(http_client_t *client)
 {
     buffered_reader_t reader = buffered_reader_defaults_from(
         client->transport, client->transport->read, client->head_buf, client->head_buf_len);
 
-    ssize_t result = buffered_reader_read_until(&reader, SV_LIT("\r\n\r\n"), headers_buf);
+    return reader;
+}
 
-    return result;
+int http_header_next(http_header_iterator_t *iter, http_header_t *out_header)
+{
+    if (iter->complete) {
+        return -1;
+    }
+
+    if (iter->cursor + 2 > iter->header_buf.buf_len) {
+        iter->complete = true;
+        return -1;
+    }
+
+    string_view_t window = SV_FROM(iter->header_buf.buf + iter->cursor, 2);
+    if (str_view_cmp(&window, &SV_LIT("\r\n"))) {
+        iter->complete = true;
+        return -1;
+    }
+
+    size_t key_start = iter->cursor;
+    out_header->key.buf = iter->header_buf.buf + iter->cursor;
+
+    // find end of key
+    while (iter->cursor < iter->header_buf.buf_len && iter->header_buf.buf[iter->cursor] != ':') {
+        iter->cursor++;
+    }
+
+    // if we ran off the end looking for a colon, then we have a malformed
+    // headers section and there's no point continuing
+    if (iter->cursor >= iter->header_buf.buf_len) {
+        iter->complete = true;
+        return -1;
+    }
+
+    out_header->key.buf_len = iter->cursor - key_start;
+    iter->cursor++; // consume ':'
+
+    // skip whitespace between key and value
+    while (
+        iter->cursor < iter->header_buf.buf_len &&
+        (iter->header_buf.buf[iter->cursor] == ' ' || iter->header_buf.buf[iter->cursor] == '\t')) {
+        iter->cursor++;
+    }
+
+    // scan for final CRLF
+    size_t value_start = iter->cursor;
+    out_header->value.buf = iter->header_buf.buf + iter->cursor;
+    while (iter->cursor < iter->header_buf.buf_len && iter->header_buf.buf[iter->cursor] != '\r') {
+        iter->cursor++;
+    }
+    out_header->value.buf_len = iter->cursor - value_start;
+
+    // consume final CRLF
+    if (iter->cursor + 2 <= iter->header_buf.buf_len) {
+        iter->cursor += 2;
+    } else {
+        iter->cursor = iter->header_buf.buf_len;
+    }
+
+    return 0;
+}
+
+ssize_t http_receive_head(buffered_reader_t *reader, char *head_buf, size_t head_buf_cap)
+{
+    ssize_t nread =
+        buffered_reader_read_until(reader, SV_LIT("\r\n\r\n"), head_buf, head_buf_cap);
+    if (nread < 0) {
+        return nread;
+    }
+
+    return nread;
 }

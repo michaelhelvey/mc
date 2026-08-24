@@ -1,33 +1,34 @@
 #include "json.h"
 
 #define _JSON_SINGLE_CHAR_RETURN(typ)  \
-    out_token->tok.buf = input.buf + cursor; \
+    out_token->tok.buf = input + cursor; \
     out_token->tok.buf_len = 1;        \
     out_token->tok_type = typ;         \
     return cursor + 1;
 
-#define _JSON_CURRENT_CHAR (char)input.buf[cursor]
+#define _JSON_CURRENT_CHAR (char)input[cursor]
 #define _JSON_ADVANCE_CURSOR_OR_THROW()         \
-    if (cursor + 1 > input.buf_len) {           \
+    if (cursor + 1 > input_len) {               \
         out_token->tok_type = JSON_TOK_INVALID; \
         return cursor;                          \
     }                                           \
     cursor++;
 
-#define _JSON_EOF (cursor >= input.buf_len)
+#define _JSON_EOF (cursor >= input_len)
 
-size_t json_parse(string_view_t input, json_tok_t *out_token, string_view_t str_buf)
+size_t json_parse(char *input, size_t input_len, json_tok_t *out_token, char *str_buf,
+                  size_t str_buf_cap)
 {
     out_token->tok_type = JSON_TOK_INVALID;
-    out_token->tok.buf = input.buf;
+    out_token->tok.buf = input;
     out_token->tok.buf_len = 0;
 
     uintptr_t cursor = 0;
-    while (cursor < input.buf_len && isspace(_JSON_CURRENT_CHAR)) {
+    while (cursor < input_len && isspace(_JSON_CURRENT_CHAR)) {
         _JSON_ADVANCE_CURSOR_OR_THROW();
     }
 
-    if (cursor >= input.buf_len) {
+    if (cursor >= input_len) {
         return 0;
     }
 
@@ -57,25 +58,24 @@ size_t json_parse(string_view_t input, json_tok_t *out_token, string_view_t str_
     if (_JSON_CURRENT_CHAR == '"') {
         _JSON_ADVANCE_CURSOR_OR_THROW();
         size_t str_len = 0;
-        out_token->tok.buf = str_buf.buf;
+        out_token->tok.buf = str_buf;
         out_token->tok_type = JSON_TOK_STR;
 
-        while (cursor < input.buf_len && _JSON_CURRENT_CHAR != '"' &&
-               str_len < str_buf.buf_len) {
+        while (cursor < input_len && _JSON_CURRENT_CHAR != '"' && str_len < str_buf_cap) {
             if (_JSON_CURRENT_CHAR == '\\') {
                 _JSON_ADVANCE_CURSOR_OR_THROW();
-                str_buf.buf[str_len] = _JSON_CURRENT_CHAR;
+                str_buf[str_len] = _JSON_CURRENT_CHAR;
                 str_len++;
                 _JSON_ADVANCE_CURSOR_OR_THROW();
                 continue;
             }
 
-            str_buf.buf[str_len] = _JSON_CURRENT_CHAR;
+            str_buf[str_len] = _JSON_CURRENT_CHAR;
             str_len++;
             cursor++;
         }
 
-        if (cursor >= input.buf_len) {
+        if (cursor >= input_len) {
             // ran off the end without finding a closing quote -- treat the
             // token as invalid rather than reporting a bogus advance past EOF.
             out_token->tok_type = JSON_TOK_INVALID;
@@ -88,14 +88,14 @@ size_t json_parse(string_view_t input, json_tok_t *out_token, string_view_t str_
 
     if (_JSON_CURRENT_CHAR == '-' || isnumber(_JSON_CURRENT_CHAR)) {
         out_token->tok_type = JSON_TOK_NUMBER;
-        out_token->tok.buf = input.buf + cursor;
+        out_token->tok.buf = input + cursor;
         size_t num_len = 1;
         cursor++;
 
         // somewhat cheating here, because we're not actually interpreting the
         // numbers, just tokenizing them.  Any interpreter for the numbers
         // should handle the case of it not being a valid number.
-        while (cursor < input.buf_len &&
+        while (cursor < input_len &&
                (ishexnumber(_JSON_CURRENT_CHAR) || _JSON_CURRENT_CHAR == 'b' ||
                 _JSON_CURRENT_CHAR == 'x' || _JSON_CURRENT_CHAR == 'o' ||
                 _JSON_CURRENT_CHAR == '.')) {
@@ -109,7 +109,7 @@ size_t json_parse(string_view_t input, json_tok_t *out_token, string_view_t str_
 
     // identifiers as a fallback case:
     size_t identifier_len = 0;
-    while (cursor < input.buf_len && isalnum(_JSON_CURRENT_CHAR)) {
+    while (cursor < input_len && isalnum(_JSON_CURRENT_CHAR)) {
         identifier_len++;
         cursor++;
     }
@@ -127,21 +127,21 @@ size_t json_parse(string_view_t input, json_tok_t *out_token, string_view_t str_
     return cursor;
 }
 
-// Consume a string literal whose opening quote is at input.buf[0], honoring
+// Consume a string literal whose opening quote is at input[0], honoring
 // escape sequences (so a `\"` doesn't end the string).  Returns the number of
 // bytes consumed including the closing quote, or 0 if the string is
 // unterminated.
-static size_t json_consume_string(string_view_t input)
+static size_t json_consume_string(char *input, size_t input_len)
 {
-    if (input.buf_len < 2 || input.buf[0] != '"') {
+    if (input_len < 2 || input[0] != '"') {
         return 0;
     }
 
     size_t cursor = 1;
-    while (cursor < input.buf_len) {
-        if (input.buf[cursor] == '\\') {
+    while (cursor < input_len) {
+        if (input[cursor] == '\\') {
             cursor += 2;
-        } else if (input.buf[cursor] == '"') {
+        } else if (input[cursor] == '"') {
             return cursor + 1;
         } else {
             cursor++;
@@ -152,16 +152,15 @@ static size_t json_consume_string(string_view_t input)
 }
 
 // Consume a container value by simply finding the matching closing token
-static size_t json_consume_container(string_view_t input)
+static size_t json_consume_container(char *input, size_t input_len)
 {
     uintptr_t depth = 0;
     size_t cursor = 0;
 
-    while (cursor < input.buf_len) {
-        switch (input.buf[cursor]) {
+    while (cursor < input_len) {
+        switch (input[cursor]) {
         case '"': {
-            size_t consumed =
-                json_consume_string(SV_FROM(input.buf + cursor, input.buf_len - cursor));
+            size_t consumed = json_consume_string(input + cursor, input_len - cursor);
             if (consumed == 0) {
                 return 0;
             }
@@ -194,11 +193,11 @@ static size_t json_consume_container(string_view_t input)
 // A scalar value ends as soon as we get to something that has semantic meaning
 // in JSON -- comma, colon, list/object open close, etc.  So to consume a scalar
 // value, we just have to scan until we hit one of those.
-static size_t json_consume_scalar(string_view_t input)
+static size_t json_consume_scalar(char *input, size_t input_len)
 {
     size_t cursor = 0;
-    while (cursor < input.buf_len) {
-        char c = (char)input.buf[cursor];
+    while (cursor < input_len) {
+        char c = (char)input[cursor];
         if (isspace(c) || c == '\0' || c == ',' || c == ':' || c == ']' || c == '}' || c == '"' ||
             c == '{' || c == '[') {
             break;
@@ -208,31 +207,32 @@ static size_t json_consume_scalar(string_view_t input)
     return cursor;
 }
 
-size_t json_consume_value(string_view_t input)
+size_t json_consume_value(char *input, size_t input_len)
 {
     size_t cursor = 0;
 
-    while (cursor < input.buf_len && isspace((char)input.buf[cursor])) {
+    while (cursor < input_len && isspace((char)input[cursor])) {
         cursor++;
     }
 
-    if (cursor >= input.buf_len) {
+    if (cursor >= input_len) {
         return 0;
     }
 
-    string_view_t rest = SV_FROM(input.buf + cursor, input.buf_len - cursor);
+    char *rest = input + cursor;
+    size_t rest_len = input_len - cursor;
 
     size_t value_len = 0;
-    switch (rest.buf[0]) {
+    switch (rest[0]) {
     case '"':
-        value_len = json_consume_string(rest);
+        value_len = json_consume_string(rest, rest_len);
         break;
     case '{':
     case '[':
-        value_len = json_consume_container(rest);
+        value_len = json_consume_container(rest, rest_len);
         break;
     default:
-        value_len = json_consume_scalar(rest);
+        value_len = json_consume_scalar(rest, rest_len);
         break;
     }
 
@@ -246,13 +246,13 @@ size_t json_consume_value(string_view_t input)
 
     // consume trailing whitespace and/or delimiters so that the _next_ call to
     // `json_consume_value` starts at a valid value
-    while (cursor < input.buf_len && isspace((char)input.buf[cursor])) {
+    while (cursor < input_len && isspace((char)input[cursor])) {
         cursor++;
     }
 
-    if (cursor < input.buf_len && (input.buf[cursor] == ',' || input.buf[cursor] == ':')) {
+    if (cursor < input_len && (input[cursor] == ',' || input[cursor] == ':')) {
         cursor++;
-        while (cursor < input.buf_len && isspace((char)input.buf[cursor])) {
+        while (cursor < input_len && isspace((char)input[cursor])) {
             cursor++;
         }
     }

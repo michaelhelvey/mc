@@ -77,17 +77,18 @@ typedef struct json_tok_t {
 /**
  * Parse a single token out of the input buffer, returning the number of
  * characters consumed to produce the token (including whitespace, etc),
- * positioning buf + <return> at the position required to produce the following
- * token if called again when buf set to buf + <return>.  The actual token
+ * positioning input + <return> at the position required to produce the following
+ * token if called again when input set to input + <return>.  The actual token
  * produced is written to `out_token`.
  *
  * Because strings cannot be parsed as literal views into the buffer, because of
- * escape sequences, an additional buffer is provided in `str_buf` into which
- * strings will be decoded.  If not enough space in this buffer is provided,
- * then `json_parse` will return 0.  The memory in this buffer should be assumed
- * valid only until the next call to `json_parse`
+ * escape sequences, an additional buffer is provided in `str_buf` (with capacity
+ * `str_buf_cap`) into which strings will be decoded.  If not enough space in
+ * this buffer is provided, then `json_parse` will return 0.  The memory in this
+ * buffer should be assumed valid only until the next call to `json_parse`.
  */
-size_t json_parse(string_view_t input, json_tok_t *out_token, string_view_t str_buf);
+size_t json_parse(char *input, size_t input_len, json_tok_t *out_token, char *str_buf,
+                  size_t str_buf_cap);
 
 /**
  * Consume a single JSON value from the input buffer, returning the number of
@@ -105,7 +106,7 @@ size_t json_parse(string_view_t input, json_tok_t *out_token, string_view_t str_
  * with a leading delimiter), or the value is malformed or unterminated, then
  * this function returns 0.
  */
-size_t json_consume_value(string_view_t input);
+size_t json_consume_value(char *input, size_t input_len);
 
 #ifdef __cplusplus
 }
