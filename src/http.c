@@ -168,81 +168,124 @@ ssize_t http_flush_request(http_client_t *client)
     return client->transport->write(client->transport, client->head_buf, client->cursor);
 }
 
-buffered_reader_t http_create_response_reader(http_client_t *client)
+void http_init_response_parser(http_client_t *client, http_response_parser_t *in_parser,
+                               char *head_buf, size_t head_buf_len)
 {
     buffered_reader_t reader = buffered_reader_defaults_from(
         client->transport, client->transport->read, client->head_buf, client->head_buf_len);
 
-    return reader;
+    in_parser->reader = reader;
+    in_parser->head_buf = head_buf;
+    in_parser->head_buf_len = head_buf_len;
+    in_parser->headers_complete = false;
+    in_parser->headers_cursor = 0;
+    in_parser->head_buf_view = SV_FROM(NULL, 0);
 }
 
-int http_header_next(http_header_iterator_t *iter, http_header_t *out_header)
+ssize_t http_receive_head(http_response_parser_t *response_parser)
 {
-    if (iter->complete) {
+    ssize_t nread = buffered_reader_read_until(&response_parser->reader, SV_LIT("\r\n\r\n"),
+                                               response_parser->head_buf,
+                                               response_parser->head_buf_len);
+    if (nread < 0) {
+        return nread;
+    }
+
+    response_parser->head_buf_view = SV_FROM(response_parser->head_buf, nread);
+    return nread;
+}
+
+int http_header_next(http_response_parser_t *iter, http_header_t *out_header)
+{
+    if (iter->head_buf_view.buf == NULL) {
         return -1;
     }
 
-    if (iter->cursor + 2 > iter->header_buf.len) {
-        iter->complete = true;
+    if (iter->headers_complete) {
         return -1;
     }
 
-    string_view_t window = SV_FROM(iter->header_buf.buf + iter->cursor, 2);
+    if (iter->headers_cursor + 2 > iter->head_buf_view.len) {
+        iter->headers_complete = true;
+        return -1;
+    }
+
+    string_view_t window = SV_FROM(iter->head_buf_view.buf + iter->headers_cursor, 2);
     if (str_view_cmp(&window, &SV_LIT("\r\n"))) {
-        iter->complete = true;
+        iter->headers_complete = true;
         return -1;
     }
 
-    size_t key_start = iter->cursor;
-    out_header->key.buf = iter->header_buf.buf + iter->cursor;
+    size_t key_start = iter->headers_cursor;
+    out_header->key.buf = iter->head_buf_view.buf + iter->headers_cursor;
 
     // find end of key
-    while (iter->cursor < iter->header_buf.len && iter->header_buf.buf[iter->cursor] != ':') {
-        iter->cursor++;
+    while (iter->headers_cursor < iter->head_buf_view.len &&
+           iter->head_buf_view.buf[iter->headers_cursor] != ':') {
+        iter->headers_cursor++;
     }
 
     // if we ran off the end looking for a colon, then we have a malformed
     // headers section and there's no point continuing
-    if (iter->cursor >= iter->header_buf.len) {
-        iter->complete = true;
+    if (iter->headers_cursor >= iter->head_buf_view.len) {
+        iter->headers_complete = true;
         return -1;
     }
 
-    out_header->key.len = iter->cursor - key_start;
-    iter->cursor++; // consume ':'
+    out_header->key.len = iter->headers_cursor - key_start;
+    iter->headers_cursor++; // consume ':'
 
     // skip whitespace between key and value
-    while (
-        iter->cursor < iter->header_buf.len &&
-        (iter->header_buf.buf[iter->cursor] == ' ' || iter->header_buf.buf[iter->cursor] == '\t')) {
-        iter->cursor++;
+    while (iter->headers_cursor < iter->head_buf_view.len &&
+           (iter->head_buf_view.buf[iter->headers_cursor] == ' ' ||
+            iter->head_buf_view.buf[iter->headers_cursor] == '\t')) {
+        iter->headers_cursor++;
     }
 
     // scan for final CRLF
-    size_t value_start = iter->cursor;
-    out_header->value.buf = iter->header_buf.buf + iter->cursor;
-    while (iter->cursor < iter->header_buf.len && iter->header_buf.buf[iter->cursor] != '\r') {
-        iter->cursor++;
+    size_t value_start = iter->headers_cursor;
+    out_header->value.buf = iter->head_buf_view.buf + iter->headers_cursor;
+    while (iter->headers_cursor < iter->head_buf_view.len &&
+           iter->head_buf_view.buf[iter->headers_cursor] != '\r') {
+        iter->headers_cursor++;
     }
-    out_header->value.len = iter->cursor - value_start;
+    out_header->value.len = iter->headers_cursor - value_start;
 
     // consume final CRLF
-    if (iter->cursor + 2 <= iter->header_buf.len) {
-        iter->cursor += 2;
+    if (iter->headers_cursor + 2 <= iter->head_buf_view.len) {
+        iter->headers_cursor += 2;
     } else {
-        iter->cursor = iter->header_buf.len;
+        iter->headers_cursor = iter->head_buf_view.len;
     }
 
     return 0;
 }
 
-ssize_t http_receive_head(buffered_reader_t *reader, char *head_buf, size_t head_buf_cap)
+string_view_t http_response_read_statusline(http_response_parser_t *response_parser)
 {
-    ssize_t nread =
-        buffered_reader_read_until(reader, SV_LIT("\r\n\r\n"), head_buf, head_buf_cap);
-    if (nread < 0) {
-        return nread;
+    size_t cursor = 0;
+    size_t len = response_parser->head_buf_view.len;
+    while (cursor + 1 < len &&
+           !(response_parser->head_buf_view.buf[cursor] == '\r' &&
+             response_parser->head_buf_view.buf[cursor + 1] == '\n')) {
+        cursor++;
     }
 
-    return nread;
+    string_view_t result = SV_FROM(response_parser->head_buf_view.buf, cursor);
+
+    // advance our internal view of the head buffer to the start of the first
+    // header so that when the user requests the next header, we're ready to go.
+    // guard against degenerate cases where the statusline is missing its CRLF
+    // terminator so we never run off the end of the internal buffer.
+    if (cursor < len && response_parser->head_buf_view.buf[cursor] == '\r') {
+        cursor += 2; // consume the '\r\n' terminator
+        if (cursor > len) {
+            cursor = len;
+        }
+    }
+
+    response_parser->head_buf_view.buf += cursor;
+    response_parser->head_buf_view.len -= cursor;
+
+    return result;
 }

@@ -73,7 +73,7 @@ typedef struct string_view_t {
 #define SV_LIT(s) ((const string_view_t){ .buf = (s), .len = sizeof(s) - 1 })
 
 /**
- * Heper to create a string_view_t from an arbitrary buffer and a length.
+ * Helper to create a string_view_t from an arbitrary buffer and a length.
  */
 #define SV_FROM(s, sl) ((string_view_t){ .buf = (s), .len = sl })
 

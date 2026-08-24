@@ -126,35 +126,47 @@ int http_write_header(http_client_t *client, string_view_t key, string_view_t va
  */
 ssize_t http_flush_request(http_client_t *client);
 
-/**
- * Creates a `buffered_reader_t` from the http client for reading the response.
- */
-buffered_reader_t http_create_response_reader(http_client_t *client);
+typedef struct http_response_parser_t {
+    size_t headers_cursor;
+    char *head_buf;
+    size_t head_buf_len;
+    string_view_t head_buf_view;
+    bool headers_complete;
+    /* really the only "public" member -- you can use `reader` to read the body
+     * after parsing the head, if you want */
+    buffered_reader_t reader;
+} http_response_parser_t;
 
 /**
- * Reads the response head (status line + headers, terminated by CRLF CRLF)
- * out of `reader` and into `head_buf` (capacity `head_buf_cap`), which must be
- * large enough to hold the entire head.
- *
- * Returns the number of bytes written into `head_buf` (including the terminal
- * CRLF CRLF), or -1 on error. If the caller wants a `string_view_t` over the
- * parsed head it can construct one from `(head_buf, <return value>)`; we only
- * guarantee that the first `<return>` bytes of `head_buf` are valid.
+ * Reads the entirety of the response head into the parser's internal buffer.
+ * Returns the number of bytes read, or -1 in the case of an error.
  */
-ssize_t http_receive_head(buffered_reader_t *reader, char *head_buf, size_t head_buf_cap);
+ssize_t http_receive_head(http_response_parser_t *response_parser);
 
-typedef struct http_header_iterator_t {
-    size_t cursor;
-    string_view_t header_buf;
-    bool complete;
-} http_header_iterator_t;
+/**
+ * Initializes `in_parser` from the given client, with caller-owned space for
+ * reading the headers & statusline.
+ */
+void http_init_response_parser(http_client_t *client, http_response_parser_t *in_parser,
+                               char *head_buf, size_t head_buf_len);
 
 typedef struct http_header_t {
     string_view_t key;
     string_view_t value;
 } http_header_t;
 
-int http_header_next(http_header_iterator_t *iter, http_header_t *out_header);
+int http_header_next(http_response_parser_t *response_parser, http_header_t *out_header);
+
+/**
+ * Given a view of the entire HTTP response head, reads the statusline and
+ * returns a view into the original buffer representing the statusline of the
+ * request, sans the trailing CRLF.
+ * 
+ * This function currently doesn't have a failure case -- we just read until we
+ * either run out room in the buffer or hit a \r\n.  If we hit the end of the
+ * buffer then the returned string_view_t will just be the response head.
+ */
+string_view_t http_response_read_statusline(http_response_parser_t *response_parser);
 
 #ifdef __cplusplus
 }
