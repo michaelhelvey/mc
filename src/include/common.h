@@ -88,6 +88,14 @@ typedef struct string_view_t {
 bool str_view_cmp(const string_view_t *a, const string_view_t *b);
 
 /**
+ * Case-insensitive variant of `str_view_cmp`.  Returns `true` if both views
+ * have the same length and agree on every byte when compared case-insensitively
+ * (e.g. useful for matching HTTP header field names, which are case-insensitive
+ * by spec).  Returns `false` otherwise.
+ */
+bool str_view_cmp_ci(const string_view_t *a, const string_view_t *b);
+
+/**
  * Copies the bytes of `sv` into `out` as a NUL-terminated C string. Useful
  * when bridging into a libc / POSIX API that requires a `const char *` (e.g.
  * `getaddrinfo`).
@@ -124,7 +132,9 @@ typedef struct buffered_reader_t {
     /* cursor into buf representing where we should start writing when reading
      * more from the underlying IO source */
     size_t write_cursor;
-    /* how many bytes at a time to attempt to read out of the underlying source */
+    /* how many bytes at a time to attempt to read out of the underlying source.
+     * must be <= buf_len -- a reader whose chunk_size exceeds its buffer length
+     * is malformed and is rejected by the read functions. */
     size_t chunk_size;
 } buffered_reader_t;
 
@@ -149,6 +159,18 @@ typedef struct buffered_reader_t {
  * reader's chunk size.
  */
 ssize_t buffered_reader_read_nbytes(buffered_reader_t *reader, char *out, size_t out_cap, size_t n);
+
+/**
+ * Reads up to `out_cap` bytes out of the underlying buffer into `out`,
+ * continuing until `out` is entirely filled or the underlying source reports
+ * EOF (whichever comes first).  Returns the number of bytes read, or -1 in the
+ * case of an error.
+ *
+ * `out` must have capacity of at least `out_cap` bytes.  Internally this reads
+ * in `chunk_size`-sized pieces and copies them out, so there is no limit to the
+ * number of bytes that can be requested.
+ */
+ssize_t buffered_reader_read_all(buffered_reader_t *reader, char *out, size_t out_cap);
 
 /**
  * Pushes back `n` previously-consumed bytes so they will be returned by

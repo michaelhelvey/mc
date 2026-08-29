@@ -17,7 +17,7 @@
         .buf_len = sizeof(name##_buf),              \
         .readable = true,                           \
         .read = (buffered_reader_read_fn)mock_read, \
-        .chunk_size = 1024,                         \
+        .chunk_size = sizeof(name##_buf),           \
         .read_cursor = 0,                           \
         .write_cursor = sizeof(name##_buf),         \
     };
@@ -25,6 +25,47 @@
 ssize_t mock_read(char *buf, size_t len)
 {
     return 0;
+}
+
+static char mock_source[] = "abcdefghijklmnopqrstuvwxyz";
+static size_t mock_source_len;
+static size_t mock_source_off;
+
+// Mock that hands out `mock_source` a chunk at a time, up to the requested len.
+ssize_t mock_source_read(void *ctx, char *buf, size_t len)
+{
+    size_t avail = mock_source_len - mock_source_off;
+    if (avail > len)
+        avail = len;
+    memcpy(buf, mock_source + mock_source_off, avail);
+    mock_source_off += avail;
+    return (ssize_t)avail;
+}
+
+void test_reader_small_buffer_read_all(void)
+{
+    // A small well-formed reader (chunk_size == buf_len).  Pulling more data
+    // than one buffer fill holds exercises the fill-and-copy loop repeatedly,
+    // which is the path that used to overflow when the chunk exceeded the buf.
+    char buf[8];
+    buffered_reader_t reader = {
+        .ctx = NULL,
+        .buf = buf,
+        .buf_len = sizeof(buf),
+        .readable = true,
+        .read = (buffered_reader_read_fn)mock_source_read,
+        .chunk_size = sizeof(buf), // == buf_len, so well-formed
+        .read_cursor = 0,
+        .write_cursor = 0,
+    };
+
+    mock_source_len = 26;
+    mock_source_off = 0;
+
+    char out[26];
+    ssize_t n = buffered_reader_read_all(&reader, out, sizeof(out));
+    assert(n == 26 && "expected to read all source bytes");
+    assert(memcmp(out, mock_source, 26) == 0 && "expected all source bytes in order");
 }
 
 void test_reader_read_until(void)
@@ -67,4 +108,5 @@ void test_common(void)
 {
     TEST(test_reader_read_until);
     TEST(test_reader_unread);
+    TEST(test_reader_small_buffer_read_all);
 }

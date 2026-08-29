@@ -17,7 +17,8 @@ _Current_:
 - JSON parser
 - Common utilities (e.g. a string view type)
 - Arena allocator
+- HTTP 1.1 client (with configurable OpenSSL support for HTTPS)
 
 _Planned_:
 
-- HTTP 1.1 client (with configurable OpenSSL support for HTTPS)
+- ???

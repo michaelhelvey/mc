@@ -1,4 +1,5 @@
 cflags = "-std=c11 -Werror -Wall -Wpedantic -Wno-unused-function -Isrc/include"
+ldflags = "-lssl -lcrypto"
 
 [artifacts.mc]
 type = "static_library"

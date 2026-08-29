@@ -35,12 +35,6 @@
 extern "C" {
 #endif
 
-// declare a flag that the user can use to exclude OpenSSL from the build, if
-// they only require the plaintext functions that depend on only libc.
-#ifndef MC_OPENSSL_SUPPORT
-#define MC_OPENSSL_SUPPORT 1
-#endif
-
 // forward declaration
 struct http_transport_t;
 
@@ -167,6 +161,45 @@ int http_header_next(http_response_parser_t *response_parser, http_header_t *out
  * buffer then the returned string_view_t will just be the response head.
  */
 string_view_t http_response_read_statusline(http_response_parser_t *response_parser);
+
+// declare a flag that the user can use to exclude OpenSSL from the build, if
+// they only require the plaintext functions that depend on only libc.
+#ifndef MC_OPENSSL_SUPPORT
+#define MC_OPENSSL_SUPPORT 1
+#endif
+
+#if MC_OPENSSL_SUPPORT
+#include <openssl/ssl.h>
+
+/**
+ * Performs DNS resolution and creates an SSL connection to a given domain. If
+ * the provided SSL_ctx is NULL, it will be initialized and set here as an
+ * output parameter.  SSL_CTX should be shared between all SSL connections in
+ * the application; it is relatively expensive to create.
+ * 
+ * Reasonable (to me) defaults are set up on the SSL_CTX if it's NULL, if you
+ * want to customize the behavior of OpenSSL, feel free to create an SSL_CTX of
+ * your own and this function will respect it.
+ * 
+ * Returns 0 on sucess and -1 on error; Error descriptions can be gained from
+ * the OpenSSL error stack.  In the event of an error during socket creation,
+ * the SSL_CTX, if created, is NOT freed. The caller is responsible for calling
+ * SSL_CTX_free from the OpenSSL library when appropriate, that is not handled
+ * by anything in this library, as we can't possibly know how long your SSL_CTX
+ * should live.
+ * 
+ * @see https://docs.openssl.org/master/man7/ossl-guide-tls-client-block/#creating-the-ssl_ctx-and-ssl-objects
+ */
+int http_init_ssl_transport(http_transport_t *transport, string_view_t domain, SSL_CTX *ctx);
+
+/**
+ * Closes and frees the SSL connection associated with a given transport.
+ * Panics with an assertion error if the transport is not a ssl transport
+ * (ctx_type != HTTP_CTX_SSL).
+ */
+int http_close_ssl_transport(http_transport_t *transport);
+
+#endif // MC_OPENSSL_SUPPORT
 
 #ifdef __cplusplus
 }

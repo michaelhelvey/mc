@@ -1,12 +1,15 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "http.h"
 #include "common.h"
+#include "json.h"
 
 void make_example_plaintext_request(void)
 {
+    printf("\n---------------------- example plaintext request ----------------------\n");
     http_transport_t transport;
     // surely google doesn't mind a little spam in my tests, right...right...
     http_init_plaintext_transport(&transport, SV_LIT("google.com"));
@@ -51,7 +54,99 @@ void make_example_plaintext_request(void)
                SV_FMT(header.value));
     }
 
-    // TODO: parse content-length & parse some json or something
+    // TODO: parse content-length and read body (probably need like a
+    // read_to_end function on buffered reader?)
+}
+
+// makes a request to https://opencode.ai/zen/go/v1/models and prints the id of
+// every model returned in the JSON response, demonstrating the funtionality of
+// both the HTTPS and JSON libraries.
+void make_example_ssl_json_request(void)
+{
+    printf("\n---------------------- example ssl request ----------------------\n");
+    http_transport_t transport;
+    http_init_ssl_transport(&transport, SV_LIT("opencode.ai"), NULL);
+
+    char scratch_buf[2048];
+    http_client_t client = {
+        .transport = &transport,
+        .head_buf = scratch_buf,
+        .head_buf_len = sizeof(scratch_buf),
+        .cursor = 0,
+    };
+
+    http_write_request_line(&client, SV_LIT("GET"), SV_LIT("/zen/go/v1/models"));
+    http_write_header(&client, SV_LIT("Host"), SV_LIT("opencode.ai"));
+    http_flush_request(&client);
+
+    char headers_buf[4096];
+    http_response_parser_t parser;
+    http_init_response_parser(&client, &parser, headers_buf, sizeof(headers_buf));
+    http_receive_head(&parser);
+
+    http_header_t header;
+    long content_length = -1;
+    while (http_header_next(&parser, &header) != -1)
+        if (str_view_cmp_ci(&header.key, &SV_LIT("content-length"))) {
+            char cl_buf[32];
+            SV_AS_C_STR(header.value, cl_buf);
+            content_length = strtol(cl_buf, NULL, 10);
+        }
+
+    char body[1 << 20];
+    assert(content_length >= 0 && (size_t)content_length <= sizeof(body) &&
+           "response body exceeds stack buffer");
+    size_t got = (size_t)buffered_reader_read_all(&parser.reader, body, (size_t)content_length);
+
+    // tokenize the JSON, printing the value of every "id" key
+    json_tok_t tok;
+    char str_buf[1024];
+    char *p = body;
+    size_t remaining = got;
+    bool in_key = true, is_id = false;
+    while (remaining > 0) {
+        size_t adv = json_parse(p, remaining, &tok, str_buf, sizeof(str_buf));
+        if (adv == 0 || tok.tok_type == JSON_TOK_INVALID)
+            break;
+
+        if (tok.tok_type == JSON_TOK_STR) {
+            if (in_key)
+                is_id = str_view_cmp(&tok.tok, &SV_LIT("id"));
+            else if (is_id)
+                printf("model id: %.*s\n", SV_FMT(tok.tok));
+        }
+
+        in_key = tok.tok_type == JSON_TOK_OBJECT_OPEN || tok.tok_type == JSON_TOK_COMMA;
+        if (in_key)
+            is_id = false;
+
+        p += adv;
+        remaining -= adv;
+    }
+
+    http_close_ssl_transport(&transport);
+}
+
+void test_response_parser_bounds_chunk_size(void)
+{
+    // The response parser reuses the client's head buffer as its reader's
+    // buffer.  Even if that buffer is smaller than the default chunk size, the
+    // parser must never create a malformed reader (chunk_size > buf_len).
+    char scratch[32];
+    http_transport_t transport = { 0 };
+    http_client_t client = {
+        .transport = &transport,
+        .head_buf = scratch,
+        .head_buf_len = sizeof(scratch),
+        .cursor = 0,
+    };
+
+    char headers_buf[128];
+    http_response_parser_t parser;
+    http_init_response_parser(&client, &parser, headers_buf, sizeof(headers_buf));
+
+    assert(parser.reader.chunk_size <= parser.reader.buf_len &&
+           "reader chunk_size must not exceed its buffer length");
 }
 
 void test_header_iterator_simple(void)
@@ -95,5 +190,7 @@ void test_header_iterator_simple(void)
 void test_http_client(void)
 {
     TEST(test_header_iterator_simple);
+    TEST(test_response_parser_bounds_chunk_size);
     make_example_plaintext_request();
+    make_example_ssl_json_request();
 }

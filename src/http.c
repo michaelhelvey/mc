@@ -174,6 +174,12 @@ void http_init_response_parser(http_client_t *client, http_response_parser_t *in
     buffered_reader_t reader = buffered_reader_defaults_from(
         client->transport, client->transport->read, client->head_buf, client->head_buf_len);
 
+    // the reader's buffer is the client's head buffer, which the caller may
+    // have sized smaller than the default chunk size.  cap chunk_size so the
+    // underlying read() never writes more than the buffer can hold.
+    if (reader.chunk_size > reader.buf_len)
+        reader.chunk_size = reader.buf_len;
+
     in_parser->reader = reader;
     in_parser->head_buf = head_buf;
     in_parser->head_buf_len = head_buf_len;
@@ -265,9 +271,8 @@ string_view_t http_response_read_statusline(http_response_parser_t *response_par
 {
     size_t cursor = 0;
     size_t len = response_parser->head_buf_view.len;
-    while (cursor + 1 < len &&
-           !(response_parser->head_buf_view.buf[cursor] == '\r' &&
-             response_parser->head_buf_view.buf[cursor + 1] == '\n')) {
+    while (cursor + 1 < len && !(response_parser->head_buf_view.buf[cursor] == '\r' &&
+                                 response_parser->head_buf_view.buf[cursor + 1] == '\n')) {
         cursor++;
     }
 
@@ -289,3 +294,153 @@ string_view_t http_response_read_statusline(http_response_parser_t *response_par
 
     return result;
 }
+
+#if MC_OPENSSL_SUPPORT
+
+static SSL_CTX *init_ssl_ctx_defaults(void)
+{
+    SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
+    if (ctx == NULL)
+        goto error;
+
+    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+    if (!SSL_CTX_set_default_verify_paths(ctx))
+        goto error;
+
+    if (!SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION))
+        goto error;
+
+    return ctx;
+error:
+    SSL_CTX_free(ctx);
+    return NULL;
+}
+
+ssize_t ssl_transport_read(http_transport_t *transport, char *buf, size_t len)
+{
+    size_t read_bytes;
+    int result = SSL_read_ex((SSL *)transport->ctx.ctx, buf, len, &read_bytes);
+
+    if (!result) {
+        return -1;
+    }
+
+    return (ssize_t)read_bytes;
+}
+
+ssize_t ssl_transport_write(http_transport_t *transport, const char *buf, size_t len)
+{
+    // note that OpenSSL guarantees that write will not return until it has
+    // written _all_ of buf (or has errored) unless we explicitly enable partial
+    // writes with a flag. This allows us to not do the loop that we do for
+    // plaintext_transport_write.
+    size_t written_bytes;
+    int result = SSL_write_ex((SSL *)transport->ctx.ctx, buf, len, &written_bytes);
+    if (!result) {
+        return -1;
+    }
+
+    return (ssize_t)written_bytes;
+}
+
+int http_init_ssl_transport(http_transport_t *transport, string_view_t domain, SSL_CTX *ctx)
+{
+    transport->ctx_type = HTTP_CTX_SSL;
+    transport->read = ssl_transport_read;
+    transport->write = ssl_transport_write;
+
+    if (ctx == NULL) {
+        ctx = init_ssl_ctx_defaults();
+        if (ctx == NULL)
+            return -1;
+    }
+
+    SSL *ssl = SSL_new(ctx);
+    transport->ctx.ctx = ssl;
+    if (ssl == NULL)
+        goto error;
+
+    int sock = -1;
+    BIO_ADDRINFO *res;
+    const BIO_ADDRINFO *ai = NULL;
+
+    char domain_buf[MC_MAX_DOMAIN_LEN];
+    if (!SV_AS_C_STR(domain, domain_buf)) {
+        snprintf(err_buf, sizeof(err_buf), "domain of length %zu exceeds maximum of %zu",
+                 domain.len, sizeof(domain_buf) - 1);
+        return -1;
+    }
+
+    // TODO: it would be nice to support *both* ipv4 and ipv6 in the same loop,
+    // like we do for plaintext, but based on the documentation I'm not sure how
+    // to do that without performing lookup_ex twice, which doesn't seem right.
+    if (!BIO_lookup_ex(domain_buf, "https", BIO_LOOKUP_CLIENT, AF_INET, SOCK_STREAM, 0, &res)) {
+        goto error;
+    }
+
+    for (ai = res; ai != NULL; ai = BIO_ADDRINFO_next(ai)) {
+        sock = BIO_socket(BIO_ADDRINFO_family(ai), SOCK_STREAM, 0, 0);
+        if (sock == -1) {
+            continue;
+        }
+
+        if (!BIO_connect(sock, BIO_ADDRINFO_address(ai), BIO_SOCK_NODELAY)) {
+            BIO_closesocket(sock);
+            sock = -1;
+            continue;
+        }
+
+        // we have a connected socket if we get to here, no point trying the others
+        break;
+    }
+
+    BIO_ADDRINFO_free(res);
+
+    // we were unable to connect to any returned IP address for the given domain
+    if (sock == -1) {
+        goto error;
+    }
+
+    BIO *bio;
+    bio = BIO_new(BIO_s_socket());
+    if (bio == NULL) {
+        BIO_closesocket(sock);
+        goto error;
+    }
+
+    // close the socket when the BIO is freed, which will be done in
+    // `http_close_ssl_transport`>, or in `error` if we encounter an error
+    // during the handshake below.
+    BIO_set_fd(bio, sock, BIO_CLOSE);
+    SSL_set_bio(ssl, bio, bio);
+
+    // SNI:
+    if (!SSL_set_tlsext_host_name(ssl, domain_buf)) {
+        goto error;
+    }
+
+    if (!SSL_set1_host(ssl, domain_buf)) {
+        goto error;
+    }
+
+    if (SSL_connect(ssl) < 1) {
+        // TODO: I think I've mentioned this elsewhere but we really need some
+        // kind of debug logging facility so that the caller can get better info
+        // on what happened (e.g. allocation error vs cert verification error).
+        goto error;
+    }
+
+    return 0;
+error:
+    SSL_free(ssl);
+    return -1;
+}
+
+int http_close_ssl_transport(http_transport_t *transport)
+{
+    assert(transport->ctx_type == HTTP_CTX_SSL);
+    SSL_free((SSL *)transport->ctx.ctx);
+    return 0;
+}
+
+#endif // MC_OPENSSL_SUPPORT
